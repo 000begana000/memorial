@@ -7,6 +7,7 @@ import {
   setDoc,
   getDocs,
   writeBatch,
+  deleteDoc,
 } from "firebase/firestore";
 
 export default function FileUpload() {
@@ -33,10 +34,26 @@ export default function FileUpload() {
     const querySnapshot = await getDocs(collection(db, "images"));
     let currImages = [];
     querySnapshot.forEach(doc => {
-      currImages = [...currImages, doc.data().imageUrl];
+      currImages = [...currImages, { 
+        id: doc.id, 
+        imageUrl: doc.data().imageUrl,
+        fileName: doc.data().fileName 
+      }];
     });
     setImages(currImages);
     setLoading(false);
+  }
+
+  // Handle image load errors by removing from Firestore
+  async function handleImageError(imageData) {
+    console.log(`Image failed to load: ${imageData.fileName}, removing from database`);
+    try {
+      await deleteDoc(doc(db, "images", imageData.id));
+      // Remove from local state
+      setImages(prevImages => prevImages.filter(img => img.id !== imageData.id));
+    } catch (error) {
+      console.error("Error removing broken image reference:", error);
+    }
   }
 
   function handleChange(event) {
@@ -150,7 +167,7 @@ export default function FileUpload() {
           onClick={handleParallelUpload}
           disabled={uploaded || uploading || files.length === 0}
         >
-          Save to memorial borad
+          Save to memorial board
         </button>
 
         {uploading && (
@@ -189,14 +206,15 @@ export default function FileUpload() {
         {loading && <p>Loading....</p>}
         <ul>
           {images &&
-            images.map(imageUrl => {
+            images.map(imageData => {
               return (
-                <li>
+                <li key={imageData.id}>
                   <img
                     className="image"
-                    src={imageUrl}
-                    key={imageUrl}
-                    alt="Uploaded"
+                    src={imageData.imageUrl}
+                    alt="Memorial photo"
+                    onError={() => handleImageError(imageData)}
+                    onLoad={() => console.log(`Image loaded successfully: ${imageData.fileName}`)}
                   />
                 </li>
               );
