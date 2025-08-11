@@ -46,6 +46,10 @@ button {
   margin-bottom: 20px;
 }
 
+li {
+  list-style: none;
+}
+
 .image {
   width: 300px;
 }
@@ -57,8 +61,18 @@ button {
   grid-template-columns: repeat(3, 1fr);
   grid-column-gap: 2rem 2rem;
 
+  img:hover {
+    transform: rotate(0deg);
+    transition: all 0.2s ease;
+  }
+
   img {
     align-self: center;
     justify-self: center;
+    background-color: white;
+    padding: 20px 20px 60px 20px;
+    box-shadow: 3px 5px 34px -15px rgba(0, 0, 0, 0.81);
+    transform: rotate(5deg);
+    transition: all 0.2s ease;
   }
 }

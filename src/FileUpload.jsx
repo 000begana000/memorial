@@ -187,17 +187,21 @@ export default function FileUpload() {
 
       <div className="images-collection">
         {loading && <p>Loading....</p>}
-        {images &&
-          images.map(imageUrl => {
-            return (
-              <img
-                className="image"
-                src={imageUrl}
-                key={imageUrl}
-                alt="Uploaded"
-              />
-            );
-          })}
+        <ul>
+          {images &&
+            images.map(imageUrl => {
+              return (
+                <li>
+                  <img
+                    className="image"
+                    src={imageUrl}
+                    key={imageUrl}
+                    alt="Uploaded"
+                  />
+                </li>
+              );
+            })}
+        </ul>
       </div>
     </>
   );
