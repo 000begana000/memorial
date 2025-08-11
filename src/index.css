@@ -106,6 +106,13 @@ button {
   align-items: center;
 }
 
+/* Media container for positioning video indicator */
+.media-container {
+  position: relative;
+  width: 100%;
+  max-width: 250px;
+}
+
 .image {
   width: 100%;
   max-width: 250px;
@@ -121,6 +128,29 @@ button {
 
 .image:hover {
   transition: all 0.3s ease;
+}
+
+/* Video play indicator */
+.video-indicator {
+  position: absolute;
+  bottom: 15px;
+  right: 15px;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.video-indicator svg {
+  width: 16px;
+  height: 16px;
+  margin-left: 2px; /* Slight offset to center the play triangle */
 }
 
 /* Random rotation classes - applied dynamically */
@@ -233,8 +263,24 @@ button {
     gap: 20px;
   }
   
+  .media-container {
+    max-width: 200px;
+  }
+
   .image {
     max-width: 200px;
+  }
+
+  .video-indicator {
+    bottom: 12px;
+    right: 12px;
+    width: 28px;
+    height: 28px;
+  }
+
+  .video-indicator svg {
+    width: 14px;
+    height: 14px;
   }
 
   .modal-overlay {
@@ -255,9 +301,25 @@ button {
     gap: 15px;
   }
   
+  .media-container {
+    max-width: 150px;
+  }
+
   .image {
     max-width: 150px;
     padding: 15px 15px 45px 15px;
+  }
+
+  .video-indicator {
+    bottom: 10px;
+    right: 10px;
+    width: 24px;
+    height: 24px;
+  }
+
+  .video-indicator svg {
+    width: 12px;
+    height: 12px;
   }
 
   .modal-overlay {

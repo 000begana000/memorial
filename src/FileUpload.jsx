@@ -55,6 +55,49 @@ export default function FileUpload() {
     };
   }, [isModalOpen]);
 
+  // Helper function to determine if file is a video
+  function isVideoFile(fileName) {
+    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp', '.flv'];
+    return videoExtensions.some(ext => fileName.toLowerCase().endsWith(ext));
+  }
+
+  // Generate video thumbnail
+  async function generateVideoThumbnail(file) {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      video.preload = 'metadata';
+      video.muted = true;
+      
+      video.onloadedmetadata = () => {
+        // Set canvas dimensions
+        canvas.width = 300;
+        canvas.height = (video.videoHeight / video.videoWidth) * 300;
+        
+        // Seek to 1 second (or 10% of duration, whichever is smaller)
+        video.currentTime = Math.min(1, video.duration * 0.1);
+      };
+      
+      video.onseeked = () => {
+        // Draw video frame to canvas
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Convert canvas to blob
+        canvas.toBlob((blob) => {
+          resolve(blob);
+        }, 'image/jpeg', 0.7);
+      };
+      
+      video.onerror = () => {
+        resolve(null);
+      };
+      
+      video.src = URL.createObjectURL(file);
+    });
+  }
+
   async function loadAllImages() {
     setLoading(true);
     const querySnapshot = await getDocs(collection(db, "images"));
@@ -63,7 +106,9 @@ export default function FileUpload() {
       currImages = [...currImages, { 
         id: doc.id, 
         imageUrl: doc.data().imageUrl,
-        fileName: doc.data().fileName 
+        thumbnailUrl: doc.data().thumbnailUrl || null,
+        fileName: doc.data().fileName,
+        fileType: doc.data().fileType || 'image' // New field to track file type
       }];
     });
     setImages(currImages);
@@ -105,6 +150,16 @@ export default function FileUpload() {
       // Delete from Firebase Storage
       const imageRef = ref(storage, `images/${imageData.fileName}`);
       await deleteObject(imageRef);
+      
+      // Delete thumbnail if it exists (for videos)
+      if (imageData.thumbnailUrl && imageData.fileType === 'video') {
+        const thumbnailRef = ref(storage, `thumbnails/${imageData.fileName}_thumbnail.jpg`);
+        try {
+          await deleteObject(thumbnailRef);
+        } catch (error) {
+          console.log("Thumbnail not found or already deleted");
+        }
+      }
       
       // Delete from Firestore
       await deleteDoc(doc(db, "images", imageData.id));
@@ -158,7 +213,8 @@ export default function FileUpload() {
 
     const uploadPromises = files.map(async file => {
       try {
-        const storageRef = ref(storage, `images/${file.name}`);
+        const isVideo = isVideoFile(file.name);
+        const storageRef = ref(storage, `images/${file.name}`); // Keep using images folder
         const uploadTask = uploadBytesResumable(storageRef, file);
 
         const downloadURL = await new Promise((resolve, reject) => {
@@ -183,9 +239,37 @@ export default function FileUpload() {
           );
         });
 
+        let thumbnailURL = null;
+
+        // Generate and upload thumbnail for videos
+        if (isVideo) {
+          const thumbnailBlob = await generateVideoThumbnail(file);
+          if (thumbnailBlob) {
+            const thumbnailRef = ref(storage, `thumbnails/${file.name}_thumbnail.jpg`);
+            const thumbnailUploadTask = uploadBytesResumable(thumbnailRef, thumbnailBlob);
+            
+            thumbnailURL = await new Promise((resolve, reject) => {
+              thumbnailUploadTask.on(
+                "state_changed",
+                null,
+                error => {
+                  console.error("Thumbnail upload error:", error);
+                  resolve(null); // Continue without thumbnail
+                },
+                async () => {
+                  const url = await getDownloadURL(thumbnailUploadTask.snapshot.ref);
+                  resolve(url);
+                }
+              );
+            });
+          }
+        }
+
         return {
           fileName: file.name,
           downloadURL,
+          thumbnailURL,
+          fileType: isVideo ? 'video' : 'image',
           status: "success",
         };
       } catch (error) {
@@ -207,12 +291,19 @@ export default function FileUpload() {
     );
 
     successfulUploads.forEach(result => {
-      const imageStoreRef = doc(db, "images", result.fileName);
-      batch.set(imageStoreRef, {
+      const imageStoreRef = doc(db, "images", result.fileName); // Keep using images collection
+      const imageData = {
         imageUrl: result.downloadURL,
         fileName: result.fileName,
+        fileType: result.fileType, // Add file type
         uploadedAt: new Date(),
-      });
+      };
+      
+      if (result.thumbnailURL) {
+        imageData.thumbnailUrl = result.thumbnailURL;
+      }
+      
+      batch.set(imageStoreRef, imageData);
     });
 
     try {
@@ -254,7 +345,7 @@ export default function FileUpload() {
           className="button"
           type="file"
           multiple
-          accept="image/*"
+          accept="image/*,video/*"
           onChange={handleChange}
           ref={filename}
         />
@@ -304,16 +395,30 @@ export default function FileUpload() {
         <ul>
           {images &&
             images.map(imageData => {
+              // For videos, show thumbnail if available, otherwise show the video file itself
+              const displayUrl = (imageData.fileType === 'video' && imageData.thumbnailUrl) 
+                ? imageData.thumbnailUrl 
+                : imageData.imageUrl;
+              
               return (
                 <li key={imageData.id}>
-                  <img
-                    className={`image ${isAdminMode ? 'delete-mode' : ''}`}
-                    src={imageData.imageUrl}
-                    alt="Memorial photo"
-                    onClick={() => handleImageClick(imageData)}
-                    onError={() => handleImageError(imageData)}
-                    onLoad={() => console.log(`Image loaded successfully: ${imageData.fileName}`)}
-                  />
+                  <div className="media-container">
+                    <img
+                      className={`image ${isAdminMode ? 'delete-mode' : ''}`}
+                      src={displayUrl}
+                      alt="Memorial photo"
+                      onClick={() => handleImageClick(imageData)}
+                      onError={() => handleImageError(imageData)}
+                      onLoad={() => console.log(`Image loaded successfully: ${imageData.fileName}`)}
+                    />
+                    {imageData.fileType === 'video' && (
+                      <div className="video-indicator">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M8 5v14l11-7z"/>
+                        </svg>
+                      </div>
+                    )}
+                  </div>
                 </li>
               );
             })}
@@ -325,11 +430,20 @@ export default function FileUpload() {
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="close-button" onClick={closeModal}>×</button>
-            <img
-              src={currentImage.imageUrl}
-              alt="Full-screen view"
-              className="modal-image"
-            />
+            {currentImage.fileType === 'video' ? (
+              <video
+                src={currentImage.imageUrl}
+                controls
+                className="modal-image"
+                preload="metadata"
+              />
+            ) : (
+              <img
+                src={currentImage.imageUrl}
+                alt="Full-screen view"
+                className="modal-image"
+              />
+            )}
             <div className="image-info">
               <p>{currentImage.fileName}</p>
             </div>
