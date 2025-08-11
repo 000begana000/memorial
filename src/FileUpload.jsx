@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { storage, db } from "./firebase";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import {
@@ -15,7 +15,14 @@ export default function FileUpload() {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploaded, setUploaded] = useState(false);
   const [uploadResults, setUploadResults] = useState([]);
+
+  const filename = useRef();
+
+  useEffect(() => {
+    setUploaded(false);
+  }, [files]);
 
   useEffect(() => {
     loadAllImages();
@@ -110,13 +117,16 @@ export default function FileUpload() {
     try {
       await batch.commit();
       console.log("Batch write successful");
+      //setUploading(prevState => !prevState);
     } catch (error) {
       console.error("Batch write failed:", error);
     }
 
     setUploadResults(results);
-    setUploading(false);
+    setUploading(prevState => !prevState);
+    setUploaded(prevState => !prevState);
     loadAllImages(); // Refresh the images list
+    filename.current.value = "";
   }
 
   return (
@@ -132,12 +142,13 @@ export default function FileUpload() {
           multiple
           accept="image/*" // Fixed the accept attribute
           onChange={handleChange}
+          ref={filename}
         />
 
         <button
           className="button"
           onClick={handleParallelUpload}
-          disabled={uploading || files.length === 0}
+          disabled={uploaded || uploading || files.length === 0}
         >
           Save to memorial borad
         </button>
