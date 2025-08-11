@@ -1,28 +1,25 @@
 import { useState, useEffect } from "react";
 import { storage, db } from "./firebase";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { doc, collection, setDoc, getDocs } from "firebase/firestore";
+import {
+  doc,
+  collection,
+  setDoc,
+  getDocs,
+  writeBatch,
+} from "firebase/firestore";
 
 export default function FileUpload() {
-  const [file, setFile] = useState("");
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [files, setFiles] = useState([]); // Changed to array
+  const [uploadProgress, setUploadProgress] = useState({});
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [uploaded, setUploaded] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResults, setUploadResults] = useState([]);
 
   useEffect(() => {
     loadAllImages();
   }, []);
-
-  useEffect(() => {
-    if (!open) {
-      setUploaded(false);
-    }
-  }, [open]);
-
-  function refreshPage() {
-    window.location.reload(false);
-  }
 
   async function loadAllImages() {
     setLoading(true);
@@ -36,42 +33,90 @@ export default function FileUpload() {
   }
 
   function handleChange(event) {
-    setFile(event.target.files[0]);
+    const selectedFiles = Array.from(event.target.files);
+    setFiles(selectedFiles);
+    setUploadResults([]);
+    setUploadProgress({});
   }
 
-  function handleUpload() {
-    if (!file) {
-      alert("please add the file");
+  // Method 2: Upload files in parallel (all at once)
+  async function handleParallelUpload() {
+    if (files.length === 0) {
+      alert("Please select files to upload");
+      return;
     }
 
-    const storageRef = ref(storage, `images/${file.name}`);
+    setUploading(true);
 
-    const uploadTask = uploadBytesResumable(storageRef, file);
+    const uploadPromises = files.map(async file => {
+      try {
+        const storageRef = ref(storage, `images/${file.name}`);
+        const uploadTask = uploadBytesResumable(storageRef, file);
 
-    setUploaded(false);
-
-    uploadTask.on(
-      "state_changed",
-      snapshot => {
-        const progress = Math.round(
-          (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-        );
-        setUploadProgress(progress);
-      },
-      error => {
-        console.log(error);
-      },
-      () => {
-        getDownloadURL(uploadTask.snapshot.ref).then(downloadURL => {
-          const imageStoreRef = doc(db, "images", file.name);
-          setDoc(imageStoreRef, {
-            imageUrl: downloadURL,
-          });
+        const downloadURL = await new Promise((resolve, reject) => {
+          uploadTask.on(
+            "state_changed",
+            snapshot => {
+              const progress = Math.round(
+                (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+              );
+              setUploadProgress(prev => ({
+                ...prev,
+                [file.name]: progress,
+              }));
+            },
+            error => {
+              reject(error);
+            },
+            async () => {
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(url);
+            }
+          );
         });
-        setUploaded(true);
-        refreshPage();
+
+        return {
+          fileName: file.name,
+          downloadURL,
+          status: "success",
+        };
+      } catch (error) {
+        console.error(`Error uploading ${file.name}:`, error);
+        return {
+          fileName: file.name,
+          status: "error",
+          error: error.message,
+        };
       }
+    });
+
+    const results = await Promise.all(uploadPromises);
+
+    // Batch write to Firestore for better performance
+    const batch = writeBatch(db);
+    const successfulUploads = results.filter(
+      result => result.status === "success"
     );
+
+    successfulUploads.forEach(result => {
+      const imageStoreRef = doc(db, "images", result.fileName);
+      batch.set(imageStoreRef, {
+        imageUrl: result.downloadURL,
+        fileName: result.fileName,
+        uploadedAt: new Date(),
+      });
+    });
+
+    try {
+      await batch.commit();
+      console.log("Batch write successful");
+    } catch (error) {
+      console.error("Batch write failed:", error);
+    }
+
+    setUploadResults(results);
+    setUploading(false);
+    loadAllImages(); // Refresh the images list
   }
 
   return (
@@ -80,18 +125,63 @@ export default function FileUpload() {
         <input
           type="file"
           multiple
-          accept="/image/*"
+          accept="image/*" // Fixed the accept attribute
           onChange={handleChange}
-        ></input>
-        <button onClick={handleUpload}>save</button>
-        <div>{!uploaded && <progress value={uploadProgress} max="100" />}</div>
-        {uploaded && <p>Image was uploaded successfully</p>}
+        />
+
+        <div>
+          <button
+            onClick={handleParallelUpload}
+            disabled={uploading || files.length === 0}
+          >
+            Upload Parallel
+          </button>
+        </div>
+
+        {uploading && (
+          <div>
+            <p>Uploading files...</p>
+            {Object.entries(uploadProgress).map(([fileName, progress]) => (
+              <div key={fileName}>
+                <span>{fileName}: </span>
+                <progress value={progress} max="100" />
+                <span> {progress}%</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {uploadResults.length > 0 && (
+          <div>
+            <h3>Upload Results:</h3>
+            {uploadResults.map((result, index) => (
+              <div
+                key={index}
+                style={{
+                  color: result.status === "success" ? "green" : "red",
+                  marginBottom: "5px",
+                }}
+              >
+                {result.fileName}: {result.status}
+                {result.error && ` - ${result.error}`}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
       <div className="images-collection">
         {loading && <p>Loading....</p>}
         {images &&
           images.map(imageUrl => {
-            return <img className="image" src={imageUrl} key={imageUrl} />;
+            return (
+              <img
+                className="image"
+                src={imageUrl}
+                key={imageUrl}
+                alt="Uploaded"
+              />
+            );
           })}
       </div>
     </>
