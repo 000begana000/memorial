@@ -39,7 +39,7 @@ export default function FileUpload() {
     setUploadProgress({});
   }
 
-  // Method 2: Upload files in parallel (all at once)
+  // Upload files in parallel (all at once)
   async function handleParallelUpload() {
     if (files.length === 0) {
       alert("Please select files to upload");
@@ -121,22 +121,26 @@ export default function FileUpload() {
 
   return (
     <>
-      <div>
+      <header className="header">
+        <h1>in memoria di Ross</h1>
+        <p>resterai sempre nei nostri cuori Bomberone</p>
+      </header>
+      <div className="file-container">
         <input
+          className="button"
           type="file"
           multiple
           accept="image/*" // Fixed the accept attribute
           onChange={handleChange}
         />
 
-        <div>
-          <button
-            onClick={handleParallelUpload}
-            disabled={uploading || files.length === 0}
-          >
-            Upload Parallel
-          </button>
-        </div>
+        <button
+          className="button"
+          onClick={handleParallelUpload}
+          disabled={uploading || files.length === 0}
+        >
+          Save to memorial borad
+        </button>
 
         {uploading && (
           <div>
