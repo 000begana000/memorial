@@ -20,6 +20,10 @@ export default function FileUpload() {
     }
   }, [open]);
 
+  function refreshPage() {
+    window.location.reload(false);
+  }
+
   async function loadAllImages() {
     setLoading(true);
     const querySnapshot = await getDocs(collection(db, "images"));
@@ -49,8 +53,9 @@ export default function FileUpload() {
     uploadTask.on(
       "state_changed",
       snapshot => {
-        const progress =
-          (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+        const progress = Math.round(
+          (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+        );
         setUploadProgress(progress);
       },
       error => {
@@ -64,6 +69,7 @@ export default function FileUpload() {
           });
         });
         setUploaded(true);
+        refreshPage();
       }
     );
   }
@@ -71,19 +77,21 @@ export default function FileUpload() {
   return (
     <>
       <div>
-        <input type="file" accept="/image/*" onChange={handleChange}></input>
+        <input
+          type="file"
+          multiple
+          accept="/image/*"
+          onChange={handleChange}
+        ></input>
         <button onClick={handleUpload}>save</button>
+        <div>{!uploaded && <progress value={uploadProgress} max="100" />}</div>
         {uploaded && <p>Image was uploaded successfully</p>}
       </div>
       <div className="images-collection">
         {loading && <p>Loading....</p>}
         {images &&
           images.map(imageUrl => {
-            return (
-              <div key={imageUrl} className="image-container">
-                <img src={imageUrl} />
-              </div>
-            );
+            return <img className="image" src={imageUrl} key={imageUrl} />;
           })}
       </div>
     </>
