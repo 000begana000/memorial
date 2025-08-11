@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { storage, db } from "./firebase";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import {
   doc,
   collection,
@@ -11,13 +11,20 @@ import {
 } from "firebase/firestore";
 
 export default function FileUpload() {
-  const [files, setFiles] = useState([]); // Changed to array
+  const [files, setFiles] = useState([]);
   const [uploadProgress, setUploadProgress] = useState({});
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
   const [uploadResults, setUploadResults] = useState([]);
+  
+  // Modal state for full-screen viewing
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [currentImage, setCurrentImage] = useState(null);
+  
+  // Admin state for delete functionality
+  const [isAdminMode, setIsAdminMode] = useState(false);
 
   const filename = useRef();
 
@@ -28,6 +35,25 @@ export default function FileUpload() {
   useEffect(() => {
     loadAllImages();
   }, []);
+
+  // Close modal with Escape key
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        closeModal();
+      }
+    };
+    
+    if (isModalOpen) {
+      document.addEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'hidden';
+    }
+    
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'unset';
+    };
+  }, [isModalOpen]);
 
   async function loadAllImages() {
     setLoading(true);
@@ -42,6 +68,64 @@ export default function FileUpload() {
     });
     setImages(currImages);
     setLoading(false);
+  }
+
+  // Open image in full-screen modal
+  function openModal(imageData) {
+    setCurrentImage(imageData);
+    setIsModalOpen(true);
+  }
+
+  // Close modal
+  function closeModal() {
+    setIsModalOpen(false);
+    setCurrentImage(null);
+  }
+
+  // Admin functionality
+  function handleAdminClick() {
+    const password = prompt("Enter admin password:");
+    if (password === "porrazzo123!") {
+      const newAdminMode = !isAdminMode;
+      setIsAdminMode(newAdminMode);
+      alert(newAdminMode ? "Admin mode enabled - click on images to delete them" : "Admin mode disabled");
+    } else if (password !== null) {
+      alert("Incorrect password");
+    }
+  }
+
+  // Delete image from both Firebase Storage and Firestore
+  async function deleteImage(imageData) {
+    if (!isAdminMode) return;
+    
+    const confirmDelete = confirm(`Are you sure you want to delete "${imageData.fileName}"?`);
+    if (!confirmDelete) return;
+
+    try {
+      // Delete from Firebase Storage
+      const imageRef = ref(storage, `images/${imageData.fileName}`);
+      await deleteObject(imageRef);
+      
+      // Delete from Firestore
+      await deleteDoc(doc(db, "images", imageData.id));
+      
+      // Remove from local state
+      setImages(prevImages => prevImages.filter(img => img.id !== imageData.id));
+      
+      alert("Image deleted successfully");
+    } catch (error) {
+      console.error("Error deleting image:", error);
+      alert("Error deleting image: " + error.message);
+    }
+  }
+
+  // Handle image click - either open modal or delete based on admin mode
+  function handleImageClick(imageData) {
+    if (isAdminMode) {
+      deleteImage(imageData);
+    } else {
+      openModal(imageData);
+    }
   }
 
   // Handle image load errors by removing from Firestore
@@ -134,7 +218,6 @@ export default function FileUpload() {
     try {
       await batch.commit();
       console.log("Batch write successful");
-      //setUploading(prevState => !prevState);
     } catch (error) {
       console.error("Batch write failed:", error);
     }
@@ -148,16 +231,30 @@ export default function FileUpload() {
 
   return (
     <>
+      {/* Invisible Admin Button */}
+      <button 
+        className="admin-button"
+        onClick={handleAdminClick}
+        title="Admin controls"
+      >
+      </button>
+
       <header className="header">
         <h1>in memoria di Ross</h1>
         <p>resterai sempre nei nostri cuori Bomberone</p>
+        {isAdminMode && (
+          <div className="admin-indicator">
+            <p>🗑️ DELETE MODE ACTIVE - Click images to delete them</p>
+          </div>
+        )}
       </header>
+      
       <div className="file-container">
         <input
           className="button"
           type="file"
           multiple
-          accept="image/*" // Fixed the accept attribute
+          accept="image/*"
           onChange={handleChange}
           ref={filename}
         />
@@ -210,9 +307,10 @@ export default function FileUpload() {
               return (
                 <li key={imageData.id}>
                   <img
-                    className="image"
+                    className={`image ${isAdminMode ? 'delete-mode' : ''}`}
                     src={imageData.imageUrl}
                     alt="Memorial photo"
+                    onClick={() => handleImageClick(imageData)}
                     onError={() => handleImageError(imageData)}
                     onLoad={() => console.log(`Image loaded successfully: ${imageData.fileName}`)}
                   />
@@ -221,6 +319,23 @@ export default function FileUpload() {
             })}
         </ul>
       </div>
+
+      {/* Full-screen Modal */}
+      {isModalOpen && currentImage && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="close-button" onClick={closeModal}>×</button>
+            <img
+              src={currentImage.imageUrl}
+              alt="Full-screen view"
+              className="modal-image"
+            />
+            <div className="image-info">
+              <p>{currentImage.fileName}</p>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

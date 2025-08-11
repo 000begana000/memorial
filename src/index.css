@@ -6,6 +6,25 @@ body {
   background-color: #fbba00;
 }
 
+/* Invisible Admin Button */
+.admin-button {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  z-index: 999;
+  opacity: 0;
+}
+
+.admin-button:hover {
+  opacity: 0.1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
 :root {
   margin: 0;
   padding: 0;
@@ -23,6 +42,27 @@ body {
     font-size: 40px;
     margin: 0;
   }
+  
+  p {
+    font-size: 18px;
+    margin: 10px 0 0 0;
+  }
+}
+
+/* Admin mode indicator */
+.admin-indicator {
+  background-color: rgba(255, 0, 0, 0.8);
+  color: white;
+  padding: 10px;
+  margin-top: 15px;
+  border-radius: 5px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
 }
 
 input::file-selector-button {
@@ -37,6 +77,7 @@ button {
   padding: 10px 20px;
   border-radius: 7px;
   border: 1px solid white;
+  cursor: pointer;
 }
 
 .file-container {
@@ -72,14 +113,117 @@ button {
   background-color: white;
   padding: 20px 20px 60px 20px;
   box-shadow: 3px 5px 34px -15px rgba(0, 0, 0, 0.81);
-  transform: rotate(5deg);
-  transition: all 0.2s ease;
+  transform: rotate(0deg);
+  transition: all 0.3s ease;
   object-fit: cover;
+  cursor: pointer;
 }
 
 .image:hover {
-  transform: rotate(0deg);
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
+}
+
+/* Random rotation classes - applied dynamically */
+.image:nth-child(odd):hover {
+  transform: rotate(5deg);
+}
+
+.image:nth-child(even):hover {
+  transform: rotate(-5deg);
+}
+
+.image:nth-child(3n):hover {
+  transform: rotate(7deg);
+}
+
+.image:nth-child(4n):hover {
+  transform: rotate(-7deg);
+}
+
+.image:nth-child(5n):hover {
+  transform: rotate(3deg);
+}
+
+.image:nth-child(6n):hover {
+  transform: rotate(-3deg);
+}
+
+/* Delete mode styling */
+.image.delete-mode {
+  border: 3px solid red;
+  filter: brightness(0.7);
+}
+
+.image.delete-mode:hover {
+  filter: brightness(0.5);
+  border-color: darkred;
+  transform: rotate(0deg); /* No rotation in delete mode */
+}
+
+/* Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-content {
+  position: relative;
+  max-width: 95vw;
+  max-height: 95vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.modal-image {
+  max-width: 100%;
+  max-height: 85vh;
+  object-fit: contain;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.close-button {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  background: rgba(255, 255, 255, 0.9);
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  font-size: 24px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+  color: #000;
+}
+
+.close-button:hover {
+  background: white;
+}
+
+.image-info {
+  margin-top: 15px;
+  color: white;
+  text-align: center;
+}
+
+.image-info p {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.8;
 }
 
 /* Responsive adjustments */
@@ -92,6 +236,17 @@ button {
   .image {
     max-width: 200px;
   }
+
+  .modal-overlay {
+    padding: 10px;
+  }
+
+  .close-button {
+    top: -35px;
+    width: 35px;
+    height: 35px;
+    font-size: 20px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -103,5 +258,16 @@ button {
   .image {
     max-width: 150px;
     padding: 15px 15px 45px 15px;
+  }
+
+  .modal-overlay {
+    padding: 5px;
+  }
+
+  .close-button {
+    top: -30px;
+    width: 30px;
+    height: 30px;
+    font-size: 18px;
   }
 }
