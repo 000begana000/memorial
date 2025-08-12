@@ -25,6 +25,8 @@ export default function FileUpload() {
   
   // Admin state for delete functionality
   const [isAdminMode, setIsAdminMode] = useState(false);
+  const [selectedItems, setSelectedItems] = useState(new Set());
+  const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
 
   const filename = useRef();
 
@@ -41,10 +43,13 @@ export default function FileUpload() {
     const handleEscape = (e) => {
       if (e.key === 'Escape') {
         closeModal();
+        if (bulkDeleteMode) {
+          exitBulkDeleteMode();
+        }
       }
     };
     
-    if (isModalOpen) {
+    if (isModalOpen || bulkDeleteMode) {
       document.addEventListener('keydown', handleEscape);
       document.body.style.overflow = 'hidden';
     }
@@ -53,7 +58,7 @@ export default function FileUpload() {
       document.removeEventListener('keydown', handleEscape);
       document.body.style.overflow = 'unset';
     };
-  }, [isModalOpen]);
+  }, [isModalOpen, bulkDeleteMode]);
 
   // Helper function to determine if file is a video
   function isVideoFile(fileName) {
@@ -72,19 +77,13 @@ export default function FileUpload() {
       video.muted = true;
       
       video.onloadedmetadata = () => {
-        // Set canvas dimensions
         canvas.width = 300;
         canvas.height = (video.videoHeight / video.videoWidth) * 300;
-        
-        // Seek to 1 second (or 10% of duration, whichever is smaller)
         video.currentTime = Math.min(1, video.duration * 0.1);
       };
       
       video.onseeked = () => {
-        // Draw video frame to canvas
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        // Convert canvas to blob
         canvas.toBlob((blob) => {
           resolve(blob);
         }, 'image/jpeg', 0.7);
@@ -98,6 +97,16 @@ export default function FileUpload() {
     });
   }
 
+  // Fisher-Yates shuffle algorithm for random order
+  const shuffleArray = (array) => {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  };
+
   async function loadAllImages() {
     setLoading(true);
     const querySnapshot = await getDocs(collection(db, "images"));
@@ -108,9 +117,14 @@ export default function FileUpload() {
         imageUrl: doc.data().imageUrl,
         thumbnailUrl: doc.data().thumbnailUrl || null,
         fileName: doc.data().fileName,
-        fileType: doc.data().fileType || 'image' // New field to track file type
+        fileType: doc.data().fileType || 'image',
+        uploadedAt: doc.data().uploadedAt
       }];
     });
+    
+    // Randomize the order for each session
+    currImages = shuffleArray(currImages);
+    
     setImages(currImages);
     setLoading(false);
   }
@@ -127,19 +141,104 @@ export default function FileUpload() {
     setCurrentImage(null);
   }
 
-  // Admin functionality
+  // Admin functionality with environment variable password
   function handleAdminClick() {
     const password = prompt("Enter admin password:");
-    if (password === "porrazzo123!") {
+    if (password === null) return;
+    
+    const correctPassword = import.meta.env.VITE_ADMIN_PASSWORD;
+    
+    if (password === correctPassword) {
       const newAdminMode = !isAdminMode;
       setIsAdminMode(newAdminMode);
-      alert(newAdminMode ? "Admin mode enabled - click on images to delete them" : "Admin mode disabled");
-    } else if (password !== null) {
+      if (!newAdminMode) {
+        exitBulkDeleteMode(); // Exit bulk delete when exiting admin mode
+      }
+      alert(newAdminMode ? "Admin mode enabled" : "Admin mode disabled");
+    } else {
       alert("Incorrect password");
     }
   }
 
-  // Delete image from both Firebase Storage and Firestore
+  // Toggle item selection for bulk delete
+  function toggleItemSelection(imageId) {
+    const newSelected = new Set(selectedItems);
+    if (newSelected.has(imageId)) {
+      newSelected.delete(imageId);
+    } else {
+      newSelected.add(imageId);
+    }
+    setSelectedItems(newSelected);
+  }
+
+  // Enter bulk delete mode
+  function enterBulkDeleteMode() {
+    setBulkDeleteMode(true);
+    setSelectedItems(new Set());
+  }
+
+  // Exit bulk delete mode
+  function exitBulkDeleteMode() {
+    setBulkDeleteMode(false);
+    setSelectedItems(new Set());
+  }
+
+  // Select all items
+  function selectAllItems() {
+    const allIds = new Set(images.map(img => img.id));
+    setSelectedItems(allIds);
+  }
+
+  // Deselect all items
+  function deselectAllItems() {
+    setSelectedItems(new Set());
+  }
+
+  // Delete multiple items
+  async function bulkDeleteItems() {
+    if (selectedItems.size === 0) {
+      alert("No items selected");
+      return;
+    }
+
+    const confirmDelete = confirm(`Are you sure you want to delete ${selectedItems.size} item(s)?`);
+    if (!confirmDelete) return;
+
+    const itemsToDelete = images.filter(img => selectedItems.has(img.id));
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const imageData of itemsToDelete) {
+      try {
+        // Delete from Firebase Storage
+        const imageRef = ref(storage, `images/${imageData.fileName}`);
+        await deleteObject(imageRef);
+        
+        // Delete thumbnail if it exists
+        if (imageData.thumbnailUrl && imageData.fileType === 'video') {
+          const thumbnailRef = ref(storage, `thumbnails/${imageData.fileName}_thumbnail.jpg`);
+          try {
+            await deleteObject(thumbnailRef);
+          } catch (error) {
+            console.log("Thumbnail not found or already deleted");
+          }
+        }
+        
+        // Delete from Firestore
+        await deleteDoc(doc(db, "images", imageData.id));
+        successCount++;
+      } catch (error) {
+        console.error(`Error deleting ${imageData.fileName}:`, error);
+        errorCount++;
+      }
+    }
+
+    alert(`Deleted ${successCount} items. ${errorCount > 0 ? `${errorCount} errors.` : ''}`);
+    exitBulkDeleteMode();
+    loadAllImages(); // Refresh the list
+  }
+
+  // Delete single image
   async function deleteImage(imageData) {
     if (!isAdminMode) return;
     
@@ -147,11 +246,9 @@ export default function FileUpload() {
     if (!confirmDelete) return;
 
     try {
-      // Delete from Firebase Storage
       const imageRef = ref(storage, `images/${imageData.fileName}`);
       await deleteObject(imageRef);
       
-      // Delete thumbnail if it exists (for videos)
       if (imageData.thumbnailUrl && imageData.fileType === 'video') {
         const thumbnailRef = ref(storage, `thumbnails/${imageData.fileName}_thumbnail.jpg`);
         try {
@@ -161,34 +258,31 @@ export default function FileUpload() {
         }
       }
       
-      // Delete from Firestore
       await deleteDoc(doc(db, "images", imageData.id));
-      
-      // Remove from local state
       setImages(prevImages => prevImages.filter(img => img.id !== imageData.id));
-      
-      alert("Image deleted successfully");
+      alert("Item deleted successfully");
     } catch (error) {
-      console.error("Error deleting image:", error);
-      alert("Error deleting image: " + error.message);
+      console.error("Error deleting item:", error);
+      alert("Error deleting item: " + error.message);
     }
   }
 
-  // Handle image click - either open modal or delete based on admin mode
+  // Handle image click based on mode
   function handleImageClick(imageData) {
-    if (isAdminMode) {
+    if (bulkDeleteMode) {
+      toggleItemSelection(imageData.id);
+    } else if (isAdminMode) {
       deleteImage(imageData);
     } else {
       openModal(imageData);
     }
   }
 
-  // Handle image load errors by removing from Firestore
+  // Handle image load errors
   async function handleImageError(imageData) {
     console.log(`Image failed to load: ${imageData.fileName}, removing from database`);
     try {
       await deleteDoc(doc(db, "images", imageData.id));
-      // Remove from local state
       setImages(prevImages => prevImages.filter(img => img.id !== imageData.id));
     } catch (error) {
       console.error("Error removing broken image reference:", error);
@@ -202,7 +296,7 @@ export default function FileUpload() {
     setUploadProgress({});
   }
 
-  // Upload files in parallel (all at once)
+  // Upload files - completely open
   async function handleParallelUpload() {
     if (files.length === 0) {
       alert("Please select files to upload");
@@ -214,7 +308,7 @@ export default function FileUpload() {
     const uploadPromises = files.map(async file => {
       try {
         const isVideo = isVideoFile(file.name);
-        const storageRef = ref(storage, `images/${file.name}`); // Keep using images folder
+        const storageRef = ref(storage, `images/${file.name}`);
         const uploadTask = uploadBytesResumable(storageRef, file);
 
         const downloadURL = await new Promise((resolve, reject) => {
@@ -241,7 +335,6 @@ export default function FileUpload() {
 
         let thumbnailURL = null;
 
-        // Generate and upload thumbnail for videos
         if (isVideo) {
           const thumbnailBlob = await generateVideoThumbnail(file);
           if (thumbnailBlob) {
@@ -254,7 +347,7 @@ export default function FileUpload() {
                 null,
                 error => {
                   console.error("Thumbnail upload error:", error);
-                  resolve(null); // Continue without thumbnail
+                  resolve(null);
                 },
                 async () => {
                   const url = await getDownloadURL(thumbnailUploadTask.snapshot.ref);
@@ -284,18 +377,15 @@ export default function FileUpload() {
 
     const results = await Promise.all(uploadPromises);
 
-    // Batch write to Firestore for better performance
     const batch = writeBatch(db);
-    const successfulUploads = results.filter(
-      result => result.status === "success"
-    );
+    const successfulUploads = results.filter(result => result.status === "success");
 
     successfulUploads.forEach(result => {
-      const imageStoreRef = doc(db, "images", result.fileName); // Keep using images collection
+      const imageStoreRef = doc(db, "images", result.fileName);
       const imageData = {
         imageUrl: result.downloadURL,
         fileName: result.fileName,
-        fileType: result.fileType, // Add file type
+        fileType: result.fileType,
         uploadedAt: new Date(),
       };
       
@@ -316,7 +406,7 @@ export default function FileUpload() {
     setUploadResults(results);
     setUploading(prevState => !prevState);
     setUploaded(prevState => !prevState);
-    loadAllImages(); // Refresh the images list
+    loadAllImages();
     filename.current.value = "";
   }
 
@@ -333,9 +423,39 @@ export default function FileUpload() {
       <header className="header">
         <h1>in memoria di Ross</h1>
         <p>resterai sempre nei nostri cuori Bomberone</p>
+        
         {isAdminMode && (
           <div className="admin-indicator">
-            <p>🗑️ DELETE MODE ACTIVE - Click images to delete them</p>
+            <p>🔧 ADMIN MODE ACTIVE</p>
+            <div className="admin-controls">
+              {!bulkDeleteMode ? (
+                <>
+                  <button className="admin-btn" onClick={enterBulkDeleteMode}>
+                    📦 Bulk Delete Mode
+                  </button>
+                  <span style={{margin: '0 10px'}}>or click individual items to delete</span>
+                </>
+              ) : (
+                <div className="bulk-delete-controls">
+                  <button className="admin-btn" onClick={selectAllItems}>
+                    ✅ Select All ({images.length})
+                  </button>
+                  <button className="admin-btn" onClick={deselectAllItems}>
+                    ❌ Deselect All
+                  </button>
+                  <button 
+                    className="admin-btn delete-btn" 
+                    onClick={bulkDeleteItems}
+                    disabled={selectedItems.size === 0}
+                  >
+                    🗑️ Delete Selected ({selectedItems.size})
+                  </button>
+                  <button className="admin-btn" onClick={exitBulkDeleteMode}>
+                    ↩️ Exit Bulk Mode
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </header>
@@ -395,27 +515,32 @@ export default function FileUpload() {
         <ul>
           {images &&
             images.map(imageData => {
-              // For videos, show thumbnail if available, otherwise show the video file itself
               const displayUrl = (imageData.fileType === 'video' && imageData.thumbnailUrl) 
                 ? imageData.thumbnailUrl 
                 : imageData.imageUrl;
+              
+              const isSelected = selectedItems.has(imageData.id);
               
               return (
                 <li key={imageData.id}>
                   <div className="media-container">
                     <img
-                      className={`image ${isAdminMode ? 'delete-mode' : ''}`}
+                      className={`image ${isAdminMode && !bulkDeleteMode ? 'delete-mode' : ''} ${isSelected ? 'selected' : ''}`}
                       src={displayUrl}
-                      alt="Memorial photo"
+                      alt="Memorial content"
                       onClick={() => handleImageClick(imageData)}
                       onError={() => handleImageError(imageData)}
-                      onLoad={() => console.log(`Image loaded successfully: ${imageData.fileName}`)}
                     />
                     {imageData.fileType === 'video' && (
                       <div className="video-indicator">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                           <path d="M8 5v14l11-7z"/>
                         </svg>
+                      </div>
+                    )}
+                    {bulkDeleteMode && (
+                      <div className="selection-indicator">
+                        {isSelected ? '✅' : '⭕'}
                       </div>
                     )}
                   </div>
