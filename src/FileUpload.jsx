@@ -730,46 +730,46 @@ export default function FileUpload() {
       <div className="images-collection">
         {loading && <p>Loading....</p>}
         
-        {/* Debug Info */}
-        <div style={{ 
-          background: 'rgba(0,0,0,0.1)', 
-          padding: '10px', 
-          margin: '10px', 
-          borderRadius: '5px',
-          fontSize: '14px'
-        }}>
-          <p><strong>Debug Info:</strong></p>
-          <p>Images loaded: {images.length}</p>
-          <p>Sort mode: {sortMode}</p>
-          <button 
-            onClick={() => {
-              console.log("=== MANUAL RELOAD ===");
-              loadAllImages();
-            }}
-            style={{ padding: '5px 10px', margin: '5px' }}
-          >
-            🔄 Force Reload
-          </button>
-          <button 
-            onClick={() => {
-              console.log("=== CURRENT IMAGES STATE ===");
-              console.log("Total images in state:", images.length);
-              console.log("Images array:", images);
-              images.forEach((img, index) => {
-                console.log(`Image ${index + 1}:`, {
-                  id: img.id,
-                  fileName: img.fileName,
-                  hasImageUrl: !!img.imageUrl,
-                  hasThumbnail: !!img.thumbnailUrl,
-                  fileType: img.fileType
+        {/* Debug Info - Only visible in admin mode */}
+        {isAdminMode && (
+          <div style={{ 
+            background: 'rgba(0,0,0,0.1)', 
+            padding: '10px', 
+            margin: '10px', 
+            borderRadius: '5px',
+            fontSize: '14px'
+          }}>
+            <p><strong>Debug Info:</strong></p>
+            <p>Images loaded: {images.length}</p>
+            <p>Sort mode: {sortMode}</p>
+            <button 
+              onClick={() => {
+                console.log("=== MANUAL RELOAD ===");
+                loadAllImages();
+              }}
+              style={{ padding: '5px 10px', margin: '5px' }}
+            >
+              🔄 Force Reload
+            </button>
+            <button 
+              onClick={() => {
+                console.log("=== CURRENT IMAGES STATE ===");
+                console.log("Total images in state:", images.length);
+                console.log("Images array:", images);
+                images.forEach((img, index) => {
+                  console.log(`Image ${index + 1}:`, {
+                    id: img.id,
+                    fileName: img.fileName,
+                    hasImageUrl: !!img.imageUrl,
+                    hasThumbnail: !!img.thumbnailUrl,
+                    fileType: img.fileType
+                  });
                 });
-              });
-            }}
-            style={{ padding: '5px 10px', margin: '5px' }}
-          >
-            📊 Log Current State
-          </button>
-          {isAdminMode && (
+              }}
+              style={{ padding: '5px 10px', margin: '5px' }}
+            >
+              📊 Log Current State
+            </button>
             <button 
               onClick={syncStorageToFirestore}
               style={{ 
@@ -783,8 +783,8 @@ export default function FileUpload() {
             >
               🔄 Sync Storage → Firestore
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         <ul>
           {images &&
