@@ -1,6 +1,18 @@
-import { useState, useEffect, useRef } from "react";
+// Handle sort mode change
+  const handleSortChange = (newMode) => {
+    setSortMode(newMode);
+    // Show menu again when user interacts
+    setShowSortMenu(true);
+    // Reset timeout
+    if (sortMenuTimeout.current) {
+      clearTimeout(sortMenuTimeout.current);
+    }
+    sortMenuTimeout.current = setTimeout(() => {
+      setShowSortMenu(false);
+    }, 3000);
+  };import { useState, useEffect, useRef } from "react";
 import { storage, db } from "./firebase";
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject, listAll } from "firebase/storage";
 import {
   doc,
   collection,
@@ -27,8 +39,13 @@ export default function FileUpload() {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState(new Set());
   const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
+  
+  // Sorting state
+  const [sortMode, setSortMode] = useState('random'); // 'random' or 'date'
+  const [showSortMenu, setShowSortMenu] = useState(true);
 
   const filename = useRef();
+  const sortMenuTimeout = useRef();
 
   useEffect(() => {
     setUploaded(false);
@@ -36,7 +53,26 @@ export default function FileUpload() {
 
   useEffect(() => {
     loadAllImages();
+    
+    // Hide sort menu after 5 seconds
+    sortMenuTimeout.current = setTimeout(() => {
+      setShowSortMenu(false);
+    }, 5000);
+    
+    return () => {
+      if (sortMenuTimeout.current) {
+        clearTimeout(sortMenuTimeout.current);
+      }
+    };
   }, []);
+
+  // Re-sort images when sort mode changes
+  useEffect(() => {
+    if (images.length > 0) {
+      const sortedImages = sortImages(images, sortMode);
+      setImages(sortedImages);
+    }
+  }, [sortMode]);
 
   // Close modal with Escape key
   useEffect(() => {
@@ -107,26 +143,178 @@ export default function FileUpload() {
     return shuffled;
   };
 
+  // Sort images based on mode
+  const sortImages = (imageArray, mode) => {
+    const imageCopy = [...imageArray];
+    if (mode === 'random') {
+      return shuffleArray(imageCopy);
+    } else if (mode === 'date') {
+      return imageCopy.sort((a, b) => {
+        if (!a.uploadedAt || !b.uploadedAt) return 0;
+        return a.uploadedAt.toDate() - b.uploadedAt.toDate(); // Ascending (oldest first)
+      });
+    }
+    return imageCopy;
+  };
+
+  // Bulk import missing files from Storage to Firestore
+  async function syncStorageToFirestore() {
+    if (!isAdminMode) {
+      alert("This function requires admin access");
+      return;
+    }
+
+    const confirmSync = confirm("This will scan Firebase Storage and add missing files to Firestore. Continue?");
+    if (!confirmSync) return;
+
+    try {
+      console.log("🔄 Starting Storage → Firestore sync...");
+      
+      // Get all files from Storage
+      const storageRef = ref(storage, 'images');
+      const storageList = await listAll(storageRef);
+      console.log("📁 Files found in Storage:", storageList.items.length);
+      
+      // Get existing Firestore documents
+      const firestoreSnapshot = await getDocs(collection(db, "images"));
+      const existingFiles = new Set();
+      firestoreSnapshot.forEach(doc => {
+        existingFiles.add(doc.data().fileName);
+      });
+      console.log("📄 Documents in Firestore:", existingFiles.size);
+      
+      // Find missing files
+      const missingFiles = [];
+      for (const item of storageList.items) {
+        const fileName = item.name;
+        if (!existingFiles.has(fileName)) {
+          missingFiles.push(item);
+        }
+      }
+      
+      console.log("🚫 Missing files to add:", missingFiles.length);
+      console.log("Missing filenames:", missingFiles.map(item => item.name));
+      
+      if (missingFiles.length === 0) {
+        alert("All Storage files are already in Firestore!");
+        return;
+      }
+      
+      // Add missing files to Firestore
+      let addedCount = 0;
+      let errorCount = 0;
+      
+      for (const item of missingFiles) {
+        try {
+          console.log(`➕ Adding ${item.name} to Firestore...`);
+          
+          // Get download URL
+          const downloadURL = await getDownloadURL(item);
+          
+          // Determine file type
+          const isVideo = isVideoFile(item.name);
+          
+          // Create Firestore document
+          await setDoc(doc(db, "images", item.name), {
+            imageUrl: downloadURL,
+            fileName: item.name,
+            fileType: isVideo ? 'video' : 'image',
+            uploadedAt: new Date(), // Use current date since we don't have original
+          });
+          
+          addedCount++;
+          console.log(`✅ Added ${item.name}`);
+          
+        } catch (error) {
+          console.error(`❌ Error adding ${item.name}:`, error);
+          errorCount++;
+        }
+      }
+      
+      alert(`Sync complete!\nAdded: ${addedCount} files\nErrors: ${errorCount} files`);
+      
+      // Reload images
+      loadAllImages();
+      
+    } catch (error) {
+      console.error("❌ Sync failed:", error);
+      alert("Sync failed: " + error.message);
+    }
+  }
+
   async function loadAllImages() {
     setLoading(true);
-    const querySnapshot = await getDocs(collection(db, "images"));
-    let currImages = [];
-    querySnapshot.forEach(doc => {
-      currImages = [...currImages, { 
-        id: doc.id, 
-        imageUrl: doc.data().imageUrl,
-        thumbnailUrl: doc.data().thumbnailUrl || null,
-        fileName: doc.data().fileName,
-        fileType: doc.data().fileType || 'image',
-        uploadedAt: doc.data().uploadedAt
-      }];
-    });
-    
-    // Randomize the order for each session
-    currImages = shuffleArray(currImages);
-    
-    setImages(currImages);
+    try {
+      console.log("=== LOADING IMAGES FROM FIRESTORE ===");
+      console.log("Sort mode:", sortMode);
+      
+      // Get ALL documents from the images collection (no limit)
+      const querySnapshot = await getDocs(collection(db, "images"));
+      
+      console.log("📊 Firestore query completed!");
+      console.log("Documents returned:", querySnapshot.size);
+      console.log("Query metadata:", {
+        hasPendingWrites: querySnapshot.metadata.hasPendingWrites,
+        isFromCache: querySnapshot.metadata.fromCache
+      });
+      
+      let currImages = [];
+      let skippedCount = 0;
+      
+      querySnapshot.forEach((doc, index) => {
+        console.log(`📄 Processing document ${index + 1}/${querySnapshot.size}:`, doc.id);
+        
+        const data = doc.data();
+        console.log("Document data:", {
+          fileName: data.fileName,
+          hasImageUrl: !!data.imageUrl,
+          hasThumbnail: !!data.thumbnailUrl,
+          fileType: data.fileType,
+          uploadedAt: data.uploadedAt
+        });
+        
+        // Check if document has required fields
+        if (!data.imageUrl || !data.fileName) {
+          console.warn(`⚠️ Skipping document ${doc.id} - missing required fields:`, {
+            hasImageUrl: !!data.imageUrl,
+            hasFileName: !!data.fileName
+          });
+          skippedCount++;
+          return;
+        }
+        
+        currImages.push({ 
+          id: doc.id, 
+          imageUrl: data.imageUrl,
+          thumbnailUrl: data.thumbnailUrl || null,
+          fileName: data.fileName,
+          fileType: data.fileType || 'image',
+          uploadedAt: data.uploadedAt
+        });
+      });
+      
+      console.log("✅ Processing complete!");
+      console.log("Valid images found:", currImages.length);
+      console.log("Skipped documents:", skippedCount);
+      console.log("Image filenames:", currImages.map(img => img.fileName));
+      
+      // Apply initial sorting
+      const sortedImages = sortImages(currImages, sortMode);
+      console.log("Images after sorting:", sortedImages.length);
+      
+      setImages(sortedImages);
+      
+    } catch (error) {
+      console.error("❌ Error loading images:", error);
+      console.error("Error details:", {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
+      alert("Error loading images: " + error.message);
+    }
     setLoading(false);
+    console.log("=== LOAD IMAGES COMPLETE ===");
   }
 
   // Open image in full-screen modal
@@ -278,9 +466,18 @@ export default function FileUpload() {
     }
   }
 
-  // Handle image load errors
+  // Handle image load errors (but don't auto-delete videos)
   async function handleImageError(imageData) {
-    console.log(`Image failed to load: ${imageData.fileName}, removing from database`);
+    console.log(`Media failed to load: ${imageData.fileName}`);
+    
+    // Don't auto-delete videos - they might just need thumbnails
+    if (imageData.fileType === 'video') {
+      console.log(`⚠️ Video ${imageData.fileName} failed to load - this is expected if no thumbnail exists`);
+      return; // Don't delete videos automatically
+    }
+    
+    // Only auto-delete actual images that fail to load
+    console.log(`🗑️ Removing broken image ${imageData.fileName} from database`);
     try {
       await deleteDoc(doc(db, "images", imageData.id));
       setImages(prevImages => prevImages.filter(img => img.id !== imageData.id));
@@ -412,6 +609,26 @@ export default function FileUpload() {
 
   return (
     <>
+      {/* Discrete Sort Menu */}
+      <div className={`sort-menu ${showSortMenu ? 'visible' : 'hidden'}`}>
+        <div className="sort-options">
+          <button 
+            className={`sort-btn ${sortMode === 'random' ? 'active' : ''}`}
+            onClick={() => handleSortChange('random')}
+            title="Random order"
+          >
+            🎲 Random
+          </button>
+          <button 
+            className={`sort-btn ${sortMode === 'date' ? 'active' : ''}`}
+            onClick={() => handleSortChange('date')}
+            title="Oldest to newest"
+          >
+            📅 By Date
+          </button>
+        </div>
+      </div>
+
       {/* Invisible Admin Button */}
       <button 
         className="admin-button"
@@ -512,6 +729,63 @@ export default function FileUpload() {
 
       <div className="images-collection">
         {loading && <p>Loading....</p>}
+        
+        {/* Debug Info */}
+        <div style={{ 
+          background: 'rgba(0,0,0,0.1)', 
+          padding: '10px', 
+          margin: '10px', 
+          borderRadius: '5px',
+          fontSize: '14px'
+        }}>
+          <p><strong>Debug Info:</strong></p>
+          <p>Images loaded: {images.length}</p>
+          <p>Sort mode: {sortMode}</p>
+          <button 
+            onClick={() => {
+              console.log("=== MANUAL RELOAD ===");
+              loadAllImages();
+            }}
+            style={{ padding: '5px 10px', margin: '5px' }}
+          >
+            🔄 Force Reload
+          </button>
+          <button 
+            onClick={() => {
+              console.log("=== CURRENT IMAGES STATE ===");
+              console.log("Total images in state:", images.length);
+              console.log("Images array:", images);
+              images.forEach((img, index) => {
+                console.log(`Image ${index + 1}:`, {
+                  id: img.id,
+                  fileName: img.fileName,
+                  hasImageUrl: !!img.imageUrl,
+                  hasThumbnail: !!img.thumbnailUrl,
+                  fileType: img.fileType
+                });
+              });
+            }}
+            style={{ padding: '5px 10px', margin: '5px' }}
+          >
+            📊 Log Current State
+          </button>
+          {isAdminMode && (
+            <button 
+              onClick={syncStorageToFirestore}
+              style={{ 
+                padding: '5px 10px', 
+                margin: '5px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '3px'
+              }}
+            >
+              🔄 Sync Storage → Firestore
+            </button>
+          )}
+        </div>
+
         <ul>
           {images &&
             images.map(imageData => {
